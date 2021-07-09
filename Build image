@@ -1,0 +1,77 @@
+--------------------------
+param (
+  [Parameter(Mandatory=$true)]
+  [string]$dockerfiles=".\dockerfiles",
+  [Parameter(Mandatory=$true)]
+  [string]$buildNo,
+  [Parameter(Mandatory=$true)]
+  [string]$dockerhost,
+  [Parameter(Mandatory=$true)]
+  [string]$serviceaccount,
+  [Parameter(Mandatory=$true)]
+  [string]$ArtifactoryURL=[string]::Empty,
+  [Parameter(Mandatory=$true)]
+  [string]$Imagename=[string]::Empty,
+  [Parameter(Mandatory=$true)]
+  [string]$ArtifactoryUsername=[string]::Empty,
+  [Parameter(Mandatory=$true)]
+  [string]$ArtifactoryEncryptedpswd=[string]::Empty,
+  [Parameter(Mandatory=$true)]
+  [string]$KeyTab,
+  [Parameter(Mandatory=$false)]
+  [string]$validationURL=[string]::Empty,
+  [Parameter(Mandatory=$false)]
+  [string]$Validationflag = 1 #default
+)
+
+#$ErrorActionPreference = "Stop"
+#Consider few more Paramaters like Appname and Tag
+#$APP= ""
+#$TAG "$buildNo"
+Set-Location $dockerfiles
+
+
+Write-Output "Copying required docker files"
+COPY "..\config\nlog.config" -Destination "..\$APP\$buildNo\nlog.config"
+COPY "..\config\appsettings.json" -Destination "..\$APP\$buildNo\appsettings.json"
+
+$path = ".\entry-point.sh"
+COPY ".\entry-point.sh" -Destination "..\$APP\entry-point.sh"
+
+
+
+Write-Output "Buidling and running docker image"
+docker build --no-cache -t $APP:$TAG -f ".\dockerfile" "..\Release\$APP\$TAG" --build-arg "SVC_ACCOUNT=$serviceaccount" --build-arg "IMAGE=$Imagename"
+Write-Output "Docker image Built.........................."
+
+docker run -d -e ServiceAccount="$serviceaccount" -p 80:80/tcp --name "$APP" -it $APP:"$TAG"
+Write-Output "Docker Run Container.........................."
+
+#creating Tar file from correct image 
+Write-Output "Saving image............................................."	
+docker save $APP:"$buildNo" -o "..\$APP\$TAG\$buildNo.tar"
+Write-Output "Saved Image : $APP:$TAG"
+
+############ Validate the Container is running and API returns  ##############
+Write-Output "Validating Container ................................."
+if ($Validationflag -ne 0)
+{
+    try
+    {	
+	    $response = Invoke-WebRequest -Uri $validationURL -ErrorAction stop
+	    $StatusCode = $response.StatusCode
+        Write-Output "The API response code http:" $StatusCode
+	    $Content = $response.Content
+	    Write-Output "The API Endpoint result is:" $Content 
+    }
+    catch
+    {
+    	$StatusCode  = $_.Exeption.Response.StatusCode.value__
+    }
+}
+else 
+{
+   Write-output "The Validation flag is Off, this build will pass without validating container"
+}
+
+docker container rm $Imagename -f
